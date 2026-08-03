@@ -8,24 +8,39 @@ PDF_URL = "https://mausam.imd.gov.in/thiruvananthapuram/mcdata/district_rainfall
 CACHE_FILE = "last_forecast.txt"
 
 def get_ernakulam_data():
-    response = requests.get(PDF_URL)
-    if response.status_code != 200:
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        response = requests.get(PDF_URL, headers=headers, timeout=15)
+        response.raise_for_status()
+    except Exception as e:
+        print(f"Error downloading PDF: {e}")
         return None
 
-    with pdfplumber.open(io.BytesIO(response.content)) as pdf:
-        first_page = pdf.pages[0]
-        tables = first_page.extract_tables()
-        
-        for table in tables:
-            for row in table:
-                if row[0] and "Ernakulam" in row[0]:
-                    intensity = row[1].replace('\n', ' ') if len(row) > 1 else "N/A"
-                    probability = row[2].replace('\n', ' ') if len(row) > 2 else "N/A"
-                    return {
-                        "district": "Ernakulam",
-                        "intensity": intensity,
-                        "probability": probability
-                    }
+    try:
+        with pdfplumber.open(io.BytesIO(response.content)) as pdf:
+            first_page = pdf.pages[0]
+            tables = first_page.extract_tables()
+            
+            for table in tables:
+                for idx, row in enumerate(table):
+                    # Find Ernakulam in the table row
+                    if row and len(row) > 0 and row[0] and "Ernakulam" in str(row[0]):
+                        # Intensity values start from index 2 onwards in Row 1
+                        intensity_vals = " | ".join([str(c).replace('\n', ' ') for c in row[2:] if c])
+                        
+                        # Grab Probability values from the very next row below it
+                        prob_row = table[idx + 1] if idx + 1 < len(table) else []
+                        prob_vals = " | ".join([str(c).replace('\n', ' ') for c in prob_row[2:] if c])
+                        
+                        return {
+                            "district": "Ernakulam",
+                            "intensity": intensity_vals if intensity_vals else "N/A",
+                            "probability": prob_vals if prob_vals else "N/A"
+                        }
+    except Exception as e:
+        print(f"Error parsing PDF: {e}")
+        return None
+
     return None
 
 def has_forecast_changed(current_data):
