@@ -9,7 +9,7 @@ PDF_URL = "https://mausam.imd.gov.in/thiruvananthapuram/mcdata/district_rainfall
 CACHE_FILE = "last_forecast.txt"
 
 def get_severity_details(intensity):
-    """Maps IMD intensity codes to visual progress bars, human text, and hex color codes."""
+    """Maps IMD intensity codes to visual progress bars, hex colors, and severity levels."""
     intensity_upper = str(intensity).upper()
     
     if "XH" in intensity_upper or "EXTREMELY HEAVY" in intensity_upper:
@@ -56,7 +56,11 @@ def get_ernakulam_data():
                 
                 for idx, row in enumerate(table):
                     if row and len(row) > 0 and row[0] and "Ernakulam" in str(row[0]):
+                        
+                        # Row 1 contains Intensity codes (ISOL. H, L to M, etc.)
                         intensity_vals = [str(c).replace('\n', ' ').strip() for c in row[2:] if c]
+                        
+                        # Row 2 contains Probability terms (Very Likely, etc.)
                         prob_row = table[idx + 1] if idx + 1 < len(table) else []
                         prob_vals = [str(c).replace('\n', ' ').strip() for c in prob_row[2:] if c]
                         
@@ -102,7 +106,7 @@ def send_discord_notification(forecasts):
 
         embed_fields.append({
             "name": f"📅 {f['date']}",
-            "value": f"**Severity:** {bar_text}\n**Raw:** `{f['intensity']}`\n**Prob:** `{f['probability']}`",
+            "value": f"**Severity:** {bar_text}\n**Intensity:** `{f['intensity']}`\n**Probability:** `{f['probability']}`",
             "inline": True
         })
 
@@ -114,7 +118,7 @@ def send_discord_notification(forecasts):
         "embeds": [{
             "title": "⛈️ IMD Ernakulam 5-Day Rainfall Forecast",
             "description": f"**Summary:** {tldr_text}\n\n[Click here to open full PDF]({PDF_URL})",
-            "color": embed_color,  # Color matches the highest risk level
+            "color": embed_color,  # Dynamic color matching highest risk day
             "fields": embed_fields,
             "footer": {"text": "Automated GitHub Action Tracker • Ernakulam District"}
         }]
