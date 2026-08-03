@@ -19,6 +19,14 @@ NEWS_QUERY = "Ernakulam (holiday OR അവധി OR collector) when:1d"
 ENCODED_QUERY = urllib.parse.quote(NEWS_QUERY)
 GOOGLE_NEWS_RSS = f"https://news.google.com/rss/search?q={ENCODED_QUERY}&hl=en-IN&gl=IN&ceid=IN:en"
 
+def resolve_clean_url(url):
+    """Resolves Google News RSS redirect links to clean direct URLs for Discord buttons."""
+    try:
+        res = requests.head(url, allow_redirects=True, timeout=5)
+        return res.url
+    except Exception:
+        return url
+
 def check_district_holiday():
     """Fetches up to 2 distinct news headlines strictly regarding Ernakulam holidays for today or tomorrow."""
     try:
@@ -39,18 +47,18 @@ def check_district_holiday():
         ]
 
         found_articles = []
-        seen_links = set()
+        seen_titles = set()
 
         for entry in feed.entries[:15]:
             if len(found_articles) >= 2:
                 break
 
-            title = entry.get("title", "")
+            title = entry.get("title", "").strip()
             summary = entry.get("summary", "")
-            link = entry.get("link", "")
+            raw_link = entry.get("link", "")
             combined_text = (title + " " + summary).lower()
 
-            if link in seen_links:
+            if title in seen_titles:
                 continue
 
             # 1. Check if headline contains holiday keywords
@@ -62,20 +70,23 @@ def check_district_holiday():
                     pub_time_epoch = time.mktime(published_parsed)
                     pub_dt = datetime.fromtimestamp(pub_time_epoch, tz=pytz.utc).astimezone(ist)
                     
+                    # Ignore articles older than 4 hours if published on a previous calendar day
                     if pub_dt.date() < now_ist.date() and (now_ist - pub_dt) > timedelta(hours=4):
                         continue
 
-                # Rule B: Ignore articles explicitly referencing yesterday's date
+                # 3. Ignore articles explicitly referencing yesterday's date
                 if any(yp in combined_text for yp in yesterday_patterns):
                     continue
 
+                clean_link = resolve_clean_url(raw_link)
                 source = entry.get("source", {}).get("title", "News Outlet")
+                
                 found_articles.append({
                     "title": title,
-                    "link": link,
+                    "link": clean_link,
                     "source": source
                 })
-                seen_links.add(link)
+                seen_titles.add(title)
 
         return found_articles if found_articles else None
     except Exception as e:
@@ -221,29 +232,29 @@ def send_discord_notification(forecasts, issue_stamp, holiday_articles):
     ist = pytz.timezone('Asia/Kolkata')
     checked_time_str = datetime.now(ist).strftime("%I:%M %p IST")
 
-    # Format 2 News links in the description
     description_parts = []
     button_components = []
 
     if holiday_articles:
         description_parts.append("🚨 **DISTRICT HOLIDAY COVERAGE DETECTED:**")
         for idx, art in enumerate(holiday_articles, 1):
-            description_parts.append(f"{idx}. [{art['title']}]({art['link']}) — *{art['source']}*")
+            clean_url = art['link']
+            description_parts.append(f"{idx}. [{art['title']}]({clean_url}) — *{art['source']}*")
             
-            # Create a Link Button (Type 2 Component, Style 5 is Link)
+            # Type 2 is Button, Style 5 is Link Button
             button_components.append({
                 "type": 2,
                 "style": 5,
-                "label": f"News {idx}: {art['source'][:20]}",
-                "url": art['link']
+                "label": f"News {idx}: {art['source'][:15]}",
+                "url": clean_url
             })
         description_parts.append("")
 
-    # Add standard IMD Bulletin PDF button
+    # Button pointing directly to the IMD PDF
     button_components.append({
         "type": 2,
         "style": 5,
-        "label": "📄 View IMD PDF",
+        "label": "📄 View Official IMD PDF",
         "url": PDF_URL
     })
 
@@ -263,11 +274,10 @@ def send_discord_notification(forecasts, issue_stamp, holiday_articles):
             "fields": embed_fields,
             "footer": {"text": f"Checked at {checked_time_str} • IMD Tracker • Ernakulam"}
         }],
-        # Discord Link Buttons Action Row
         "components": [
             {
-                "type": 1,
-                "components": button_components
+                "type": 1,  # Type 1 is Action Row
+                "components": button_components[:5]  # Action Row takes max 5 buttons
             }
         ]
     }
