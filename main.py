@@ -112,10 +112,24 @@ def get_ernakulam_data():
                 dates = [str(cell).replace('\n', '').strip() for cell in header_row[1:] if cell]
 
                 for idx, row in enumerate(table):
+                    # Locate the Ernakulam row
                     if row and len(row) > 0 and row[0] and "Ernakulam" in str(row[0]):
-                        intensity_vals = [str(c).replace('\n', ' ').strip() for c in row[2:] if c]
-                        prob_row = table[idx + 1] if idx + 1 < len(table) else []
-                        prob_vals = [str(c).replace('\n', ' ').strip() for c in prob_row[2:] if c]
+                        
+                        # Inspect the adjacent row to pair them up
+                        next_row = table[idx + 1] if idx + 1 < len(table) else []
+                        
+                        row_1_label = str(row[1]).lower() if len(row) > 1 and row[1] else ""
+                        
+                        # Check which row contains "Intensity" vs "Probability"
+                        if "intensity" in row_1_label:
+                            raw_intensity = row[2:]
+                            raw_prob = next_row[2:] if next_row else []
+                        else:
+                            raw_prob = row[2:]
+                            raw_intensity = next_row[2:] if next_row else []
+
+                        intensity_vals = [str(c).replace('\n', ' ').strip() for c in raw_intensity if c]
+                        prob_vals = [str(c).replace('\n', ' ').strip() for c in raw_prob if c]
 
                         daily_forecasts = []
                         for i in range(min(len(dates), len(intensity_vals), len(prob_vals))):
