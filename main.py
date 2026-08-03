@@ -20,7 +20,7 @@ ENCODED_QUERY = urllib.parse.quote(NEWS_QUERY)
 GOOGLE_NEWS_RSS = f"https://news.google.com/rss/search?q={ENCODED_QUERY}&hl=en-IN&gl=IN&ceid=IN:en"
 
 def resolve_clean_url(url):
-    """Resolves Google News RSS redirect links to clean direct URLs for Discord buttons."""
+    """Resolves Google News RSS redirect links to clean direct URLs."""
     try:
         res = requests.head(url, allow_redirects=True, timeout=5)
         return res.url
@@ -233,34 +233,17 @@ def send_discord_notification(forecasts, issue_stamp, holiday_articles):
     checked_time_str = datetime.now(ist).strftime("%I:%M %p IST")
 
     description_parts = []
-    button_components = []
 
     if holiday_articles:
         description_parts.append("🚨 **DISTRICT HOLIDAY COVERAGE DETECTED:**")
         for idx, art in enumerate(holiday_articles, 1):
-            clean_url = art['link']
-            description_parts.append(f"{idx}. [{art['title']}]({clean_url}) — *{art['source']}*")
-            
-            # Type 2 is Button, Style 5 is Link Button
-            button_components.append({
-                "type": 2,
-                "style": 5,
-                "label": f"News {idx}: {art['source'][:15]}",
-                "url": clean_url
-            })
+            description_parts.append(f"{idx}. [{art['title']}]({art['link']}) — *{art['source']}*")
         description_parts.append("")
-
-    # Button pointing directly to the IMD PDF
-    button_components.append({
-        "type": 2,
-        "style": 5,
-        "label": "📄 View Official IMD PDF",
-        "url": PDF_URL
-    })
 
     description_parts.append(f"📌 **IMD Issue Bulletin:** `{issue_stamp}`\n")
     description_parts.append(f"{persona_commentary}\n")
     description_parts.append(f"{advisory}\n")
+    description_parts.append(f"📄 [View Official IMD PDF]({PDF_URL})")
 
     description_text = "\n".join(description_parts)
 
@@ -273,13 +256,7 @@ def send_discord_notification(forecasts, issue_stamp, holiday_articles):
             "color": embed_color,
             "fields": embed_fields,
             "footer": {"text": f"Checked at {checked_time_str} • IMD Tracker • Ernakulam"}
-        }],
-        "components": [
-            {
-                "type": 1,  # Type 1 is Action Row
-                "components": button_components[:5]  # Action Row takes max 5 buttons
-            }
-        ]
+        }]
     }
 
     res = requests.post(DISCORD_WEBHOOK_URL, json=payload)
