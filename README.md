@@ -1,6 +1,6 @@
 # 🌧️ Mazha-Radar (മഴ-Radar)
 
-[![Ernakulam Weather Tracker](https://github.com/jooohith/Mazha-Bot/actions/workflows/check_weather.yml/badge.svg)](https://github.com/jooohith/Mazha-Bot/actions/workflows/check_weather.yml)
+[![Ernakulam Weather Tracker](https://github.com/jooohith/Mazha-Radar/actions/workflows/check_weather.yml/badge.svg)](https://github.com/jooohith/Mazha-Radar/actions/workflows/check_weather.yml)
 ![Python 3.10](https://img.shields.io/badge/Python-3.10-blue.svg)
 ![Discord Webhook](https://img.shields.io/badge/Discord-Webhook-5865F2.svg?logo=discord&logoColor=white)
 ![IMD Kerala](https://img.shields.io/badge/Data_Source-IMD_Kerala-orange.svg)
