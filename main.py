@@ -23,17 +23,23 @@ def get_severity_details(intensity):
     else:
         return "🟩⬜⬜⬜⬜ (Light/None)", 0x2ECC71, 1
 
-def generate_tldr(forecasts):
-    """Generates a quick 1-sentence summary based on the highest risk days."""
+def generate_weather_presenter_commentary(forecasts):
+    """Generates dynamic AI Weather Presenter persona commentary."""
     heavy_days = [f['date'] for f in forecasts if get_severity_details(f['intensity'])[2] >= 3]
+    calm_days = [f['date'] for f in forecasts if get_severity_details(f['intensity'])[2] <= 2]
     
-    if len(heavy_days) == 1:
-        return f"⚠️ Expect heavy rainfall on **{heavy_days[0]}**. Keep rain gear handy!"
-    elif len(heavy_days) > 1:
+    if len(heavy_days) >= 3:
         days_str = ", ".join(heavy_days[:-1]) + f" and {heavy_days[-1]}"
-        return f"🚨 Heavy rainfall forecasted for **{days_str}**! Take necessary precautions."
+        return f"🚨 *'Grab your heavy-duty umbrellas, Ernakulam! ☔ IMD is predicting solid downpours on {days_str}. Stay safe on the roads!'*"
+    elif len(heavy_days) == 2:
+        return f"🌧️ *'Keep your rain gear on standby, Ernakulam! Heavy rain is likely hitting us on {heavy_days[0]} and {heavy_days[1]}.'* "
+    elif len(heavy_days) == 1:
+        comment = f"⚠️ *'Watch out on {heavy_days[0]}! Rain is picking up heavy for a bit, but the rest of the week stays manageable.'*"
+        if calm_days:
+            comment += f" *({calm_days[0]} looks safe to leave the heavy raincoat at home!)*"
+        return comment
     else:
-        return "🟢 Weather looks relatively calm with light-to-moderate rain across Ernakulam."
+        return "☀️ *'Good news, Ernakulam! No crazy downpours on the radar—just light to moderate showers scattered through the week.'*"
 
 def get_ernakulam_data():
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -50,7 +56,6 @@ def get_ernakulam_data():
             tables = first_page.extract_tables()
             
             for table in tables:
-                # Header containing dates
                 header_row = table[0]
                 dates = [str(cell).replace('\n', '').strip() for cell in header_row[1:] if cell]
                 
@@ -99,7 +104,6 @@ def send_discord_notification(forecasts):
     for f in forecasts:
         bar_text, color_code, score = get_severity_details(f['intensity'])
         
-        # Track the highest severity score to set the overall embed card color
         if score > max_severity_score:
             max_severity_score = score
             embed_color = color_code
@@ -110,23 +114,23 @@ def send_discord_notification(forecasts):
             "inline": True
         })
 
-    tldr_text = generate_tldr(forecasts)
+    persona_commentary = generate_weather_presenter_commentary(forecasts)
 
     payload = {
-        "username": "Ernakulam Weather Radar",
+        "username": "Ernakulam Weather Presenter",
         "avatar_url": "https://upload.wikimedia.org/wikipedia/commons/9/91/India_Meteorological_Department_logo.png",
         "embeds": [{
-            "title": "⛈️ IMD Ernakulam 5-Day Rainfall Forecast",
-            "description": f"**Summary:** {tldr_text}\n\n[Click here to open full PDF]({PDF_URL})",
-            "color": embed_color,  # Dynamic color matching highest risk day
+            "title": "🎙️ Ernakulam Weather Dispatch",
+            "description": f"{persona_commentary}\n\n📄 [View Official IMD PDF]({PDF_URL})",
+            "color": embed_color,  # Matches the highest risk day
             "fields": embed_fields,
-            "footer": {"text": "Automated GitHub Action Tracker • Ernakulam District"}
+            "footer": {"text": "Automated IMD Tracker • Ernakulam District"}
         }]
     }
     
     res = requests.post(DISCORD_WEBHOOK_URL, json=payload)
     if res.status_code in [200, 204]:
-        print("Successfully sent creative update to Discord!")
+        print("Successfully sent presenter update to Discord!")
     else:
         print(f"Failed to send: {res.status_code}, {res.text}")
 
