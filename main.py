@@ -20,7 +20,7 @@ ENCODED_QUERY = urllib.parse.quote(NEWS_QUERY)
 GOOGLE_NEWS_RSS = f"https://news.google.com/rss/search?q={ENCODED_QUERY}&hl=en-IN&gl=IN&ceid=IN:en"
 
 def check_district_holiday():
-    """Fetches news headlines strictly published within the last 18 hours regarding Ernakulam holidays."""
+    """Fetches news headlines strictly regarding Ernakulam holidays for today or tomorrow."""
     try:
         feed = feedparser.parse(GOOGLE_NEWS_RSS)
         holiday_keywords = ["അവധി", "holiday", "collector", "കലക്ടർ"]
@@ -28,12 +28,24 @@ def check_district_holiday():
         ist = pytz.timezone('Asia/Kolkata')
         now_ist = datetime.now(ist)
         
+        # Calculate yesterday's date patterns to filter out past holiday news
+        yesterday_ist = now_ist - timedelta(days=1)
+        yesterday_num = yesterday_ist.strftime("%d").lstrip("0")
+        yesterday_month = yesterday_ist.strftime("%b").lower()
+        
+        yesterday_patterns = [
+            f"august {yesterday_num}", f"aug {yesterday_num}",
+            f"{yesterday_num} august", f"{yesterday_num} aug",
+            f"അഗസ്റ്റ് {yesterday_num}", f"{yesterday_num} അഗസ്റ്റ്"
+        ]
+
         for entry in feed.entries[:10]:
             title = entry.get("title", "")
-            title_lower = title.lower()
+            summary = entry.get("summary", "")
+            combined_text = (title + " " + summary).lower()
 
-            # 1. Check if headline contains relevant holiday keywords
-            if any(hk in title_lower for hk in holiday_keywords):
+            # 1. Check if headline or summary contains holiday keywords
+            if any(hk in combined_text for hk in holiday_keywords):
                 
                 # 2. Strict Publication Timestamp Check
                 published_parsed = entry.get("published_parsed")
@@ -41,10 +53,15 @@ def check_district_holiday():
                     pub_time_epoch = time.mktime(published_parsed)
                     pub_dt = datetime.fromtimestamp(pub_time_epoch, tz=pytz.utc).astimezone(ist)
                     
-                    # Ignore articles older than 18 hours (e.g. yesterday's news)
-                    if (now_ist - pub_dt) > timedelta(hours=18):
-                        print(f"Skipping stale news article: '{title}' (Published: {pub_dt})")
+                    # Rule A: Ignore articles published on a previous calendar day if older than 4h
+                    if pub_dt.date() < now_ist.date() and (now_ist - pub_dt) > timedelta(hours=4):
+                        print(f"Skipping article from previous date: '{title}' (Published: {pub_dt})")
                         continue
+
+                # Rule B: Ignore articles explicitly referencing yesterday's date
+                if any(yp in combined_text for yp in yesterday_patterns):
+                    print(f"Skipping article referencing yesterday's date ({yesterday_num} {yesterday_month}): '{title}'")
+                    continue
 
                 link = entry.get("link", "")
                 source = entry.get("source", {}).get("title", "News Outlet")
