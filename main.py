@@ -19,16 +19,8 @@ NEWS_QUERY = "Ernakulam (holiday OR അവധി OR collector) when:1d"
 ENCODED_QUERY = urllib.parse.quote(NEWS_QUERY)
 GOOGLE_NEWS_RSS = f"https://news.google.com/rss/search?q={ENCODED_QUERY}&hl=en-IN&gl=IN&ceid=IN:en"
 
-def resolve_clean_url(url):
-    """Resolves Google News RSS redirect links to clean direct URLs."""
-    try:
-        res = requests.head(url, allow_redirects=True, timeout=5)
-        return res.url
-    except Exception:
-        return url
-
 def check_district_holiday():
-    """Fetches up to 2 distinct news headlines strictly regarding Ernakulam holidays for today or tomorrow."""
+    """Fetches news headlines strictly regarding Ernakulam holidays for today or tomorrow."""
     try:
         feed = feedparser.parse(GOOGLE_NEWS_RSS)
         holiday_keywords = ["അവധി", "holiday", "collector", "കലക്ടർ"]
@@ -36,6 +28,7 @@ def check_district_holiday():
         ist = pytz.timezone('Asia/Kolkata')
         now_ist = datetime.now(ist)
         
+        # Calculate yesterday's date patterns to filter out past holiday news
         yesterday_ist = now_ist - timedelta(days=1)
         yesterday_num = yesterday_ist.strftime("%d").lstrip("0")
         yesterday_month = yesterday_ist.strftime("%b").lower()
@@ -46,22 +39,12 @@ def check_district_holiday():
             f"അഗസ്റ്റ് {yesterday_num}", f"{yesterday_num} അഗസ്റ്റ്"
         ]
 
-        found_articles = []
-        seen_titles = set()
-
-        for entry in feed.entries[:15]:
-            if len(found_articles) >= 2:
-                break
-
-            title = entry.get("title", "").strip()
+        for entry in feed.entries[:10]:
+            title = entry.get("title", "")
             summary = entry.get("summary", "")
-            raw_link = entry.get("link", "")
             combined_text = (title + " " + summary).lower()
 
-            if title in seen_titles:
-                continue
-
-            # 1. Check if headline contains holiday keywords
+            # 1. Check if headline or summary contains holiday keywords
             if any(hk in combined_text for hk in holiday_keywords):
                 
                 # 2. Strict Publication Timestamp Check
@@ -70,25 +53,19 @@ def check_district_holiday():
                     pub_time_epoch = time.mktime(published_parsed)
                     pub_dt = datetime.fromtimestamp(pub_time_epoch, tz=pytz.utc).astimezone(ist)
                     
-                    # Ignore articles older than 4 hours if published on a previous calendar day
+                    # Rule A: Ignore articles published on a previous calendar day if older than 4h
                     if pub_dt.date() < now_ist.date() and (now_ist - pub_dt) > timedelta(hours=4):
+                        print(f"Skipping article from previous date: '{title}' (Published: {pub_dt})")
                         continue
 
-                # 3. Ignore articles explicitly referencing yesterday's date
+                # Rule B: Ignore articles explicitly referencing yesterday's date
                 if any(yp in combined_text for yp in yesterday_patterns):
+                    print(f"Skipping article referencing yesterday's date ({yesterday_num} {yesterday_month}): '{title}'")
                     continue
 
-                clean_link = resolve_clean_url(raw_link)
+                link = entry.get("link", "")
                 source = entry.get("source", {}).get("title", "News Outlet")
-                
-                found_articles.append({
-                    "title": title,
-                    "link": clean_link,
-                    "source": source
-                })
-                seen_titles.add(title)
-
-        return found_articles if found_articles else None
+                return f"🚨 **DISTRICT HOLIDAY COVERAGE FOUND ({source}):**\n[{title}]({link})"
     except Exception as e:
         print(f"Error checking Google News RSS: {e}")
 
@@ -150,6 +127,7 @@ def get_ernakulam_data():
             first_page = pdf.pages[0]
             raw_text = first_page.extract_text() or ""
 
+            # Extract Issue Date & Time from PDF Text
             issue_time_match = re.search(r"Time of Issue:\s*([^\n]+)", raw_text, re.IGNORECASE)
             issue_time = issue_time_match.group(1).strip() if issue_time_match else "N/A"
 
@@ -169,6 +147,7 @@ def get_ernakulam_data():
                         
                         row_1_label = str(row[1]).lower() if len(row) > 1 and row[1] else ""
                         
+                        # Explicitly check which row is Intensity vs Probability
                         if "intensity" in row_1_label:
                             raw_intensity = row[2:]
                             raw_prob = next_row[2:] if next_row else []
@@ -193,10 +172,8 @@ def get_ernakulam_data():
 
     return None, None
 
-def has_forecast_changed(forecasts, issue_stamp, holiday_articles):
-    holiday_str = " | ".join([a['link'] for a in holiday_articles]) if holiday_articles else "No Holiday"
-    current_text = f"{issue_stamp} | {holiday_str} | " + " | ".join([f"{f['date']}:{f['intensity']}:{f['probability']}" for f in forecasts])
-    
+def has_forecast_changed(forecasts, issue_stamp, holiday_alert):
+    current_text = f"{issue_stamp} | {holiday_alert} | " + " | ".join([f"{f['date']}:{f['intensity']}:{f['probability']}" for f in forecasts])
     if os.path.exists(CACHE_FILE):
         with open(CACHE_FILE, "r") as f:
             if f.read().strip() == current_text:
@@ -205,7 +182,7 @@ def has_forecast_changed(forecasts, issue_stamp, holiday_articles):
         f.write(current_text)
     return True
 
-def send_discord_notification(forecasts, issue_stamp, holiday_articles):
+def send_discord_notification(forecasts, issue_stamp, holiday_alert):
     if not DISCORD_WEBHOOK_URL:
         print("ERROR: DISCORD_WEBHOOK_URL environment variable is not set!")
         sys.exit(1)
@@ -233,12 +210,8 @@ def send_discord_notification(forecasts, issue_stamp, holiday_articles):
     checked_time_str = datetime.now(ist).strftime("%I:%M %p IST")
 
     description_parts = []
-
-    if holiday_articles:
-        description_parts.append("🚨 **DISTRICT HOLIDAY COVERAGE DETECTED:**")
-        for idx, art in enumerate(holiday_articles, 1):
-            description_parts.append(f"{idx}. [{art['title']}]({art['link']}) — *{art['source']}*")
-        description_parts.append("")
+    if holiday_alert:
+        description_parts.append(f"{holiday_alert}\n")
 
     description_parts.append(f"📌 **IMD Issue Bulletin:** `{issue_stamp}`\n")
     description_parts.append(f"{persona_commentary}\n")
@@ -267,12 +240,12 @@ def send_discord_notification(forecasts, issue_stamp, holiday_articles):
 
 if __name__ == "__main__":
     forecasts, issue_stamp = get_ernakulam_data()
-    holiday_articles = check_district_holiday()
+    holiday_alert = check_district_holiday()
 
     if forecasts:
-        if has_forecast_changed(forecasts, issue_stamp, holiday_articles):
+        if has_forecast_changed(forecasts, issue_stamp, holiday_alert):
             print("New update detected! Sending to Discord...")
-            send_discord_notification(forecasts, issue_stamp, holiday_articles)
+            send_discord_notification(forecasts, issue_stamp, holiday_alert)
         else:
             print("No change in forecast or holiday news since last check.")
     else:
