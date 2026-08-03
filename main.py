@@ -2,8 +2,9 @@ import io
 import os
 import re
 import sys
+import time
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 import requests
 import pdfplumber
@@ -13,22 +14,38 @@ DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 PDF_URL = "https://mausam.imd.gov.in/thiruvananthapuram/mcdata/district_rainfall_forecast.pdf"
 CACHE_FILE = "last_forecast.txt"
 
-# Google News RSS Search query for Ernakulam Holiday updates
-NEWS_QUERY = "Ernakulam (holiday OR അവധി OR collector)"
+# Google News RSS Search query for Ernakulam Holiday coverage published in last 24h
+NEWS_QUERY = "Ernakulam (holiday OR അവധി OR collector) when:1d"
 ENCODED_QUERY = urllib.parse.quote(NEWS_QUERY)
 GOOGLE_NEWS_RSS = f"https://news.google.com/rss/search?q={ENCODED_QUERY}&hl=en-IN&gl=IN&ceid=IN:en"
 
 def check_district_holiday():
-    """Fetches real-time aggregated news headlines regarding Ernakulam holidays."""
+    """Fetches news headlines strictly published within the last 18 hours regarding Ernakulam holidays."""
     try:
         feed = feedparser.parse(GOOGLE_NEWS_RSS)
         holiday_keywords = ["അവധി", "holiday", "collector", "കലക്ടർ"]
         
-        for entry in feed.entries[:10]:  # Inspect top 10 recent headlines
+        ist = pytz.timezone('Asia/Kolkata')
+        now_ist = datetime.now(ist)
+        
+        for entry in feed.entries[:10]:
             title = entry.get("title", "")
             title_lower = title.lower()
 
+            # 1. Check if headline contains relevant holiday keywords
             if any(hk in title_lower for hk in holiday_keywords):
+                
+                # 2. Strict Publication Timestamp Check
+                published_parsed = entry.get("published_parsed")
+                if published_parsed:
+                    pub_time_epoch = time.mktime(published_parsed)
+                    pub_dt = datetime.fromtimestamp(pub_time_epoch, tz=pytz.utc).astimezone(ist)
+                    
+                    # Ignore articles older than 18 hours (e.g. yesterday's news)
+                    if (now_ist - pub_dt) > timedelta(hours=18):
+                        print(f"Skipping stale news article: '{title}' (Published: {pub_dt})")
+                        continue
+
                 link = entry.get("link", "")
                 source = entry.get("source", {}).get("title", "News Outlet")
                 return f"🚨 **DISTRICT HOLIDAY COVERAGE FOUND ({source}):**\n[{title}]({link})"
