@@ -6,15 +6,45 @@ from datetime import datetime
 import pytz
 import requests
 import pdfplumber
+import feedparser
 
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 PDF_URL = "https://mausam.imd.gov.in/thiruvananthapuram/mcdata/district_rainfall_forecast.pdf"
 CACHE_FILE = "last_forecast.txt"
 
+# RSS Feeds for local news tracking
+NEWS_RSS_URLS = [
+    "https://www.manoramaonline.com/news/latest-news.rss",
+]
+
+def check_district_holiday():
+    """Scrapes local news RSS feeds for Ernakulam holiday announcements."""
+    holiday_keywords = ["അവധി", "holiday", "collector", "കലക്ടർ"]
+    district_keywords = ["എറണാകുളം", "ernakulam"]
+
+    for feed_url in NEWS_RSS_URLS:
+        try:
+            feed = feedparser.parse(feed_url)
+            for entry in feed.entries[:15]:  # Check top 15 recent headlines
+                title = entry.get("title", "")
+                title_lower = title.lower()
+
+                # Check if headline contains both Ernakulam and Holiday terms
+                has_district = any(dk in title_lower for dk in district_keywords)
+                has_holiday = any(hk in title_lower for hk in holiday_keywords)
+
+                if has_district and has_holiday:
+                    link = entry.get("link", "")
+                    return f"🚨 **POSSIBLE DISTRICT HOLIDAY ALERT:**\n[{title}]({link})"
+        except Exception as e:
+            print(f"Error checking news feed {feed_url}: {e}")
+
+    return None
+
 def get_severity_details(intensity):
     """Maps IMD intensity codes to visual progress bars, hex colors, and severity levels."""
     intensity_upper = str(intensity).upper()
-    
+
     if "XH" in intensity_upper or "EXTREMELY HEAVY" in intensity_upper:
         return "🟥🟥🟥🟥🟥 (Extremely Heavy)", 0xFF0000, 5
     elif "VH" in intensity_upper or "VERY HEAVY" in intensity_upper:
@@ -39,7 +69,7 @@ def generate_weather_presenter_commentary(forecasts):
     """Generates dynamic AI Weather Presenter persona commentary."""
     heavy_days = [f['date'] for f in forecasts if get_severity_details(f['intensity'])[2] >= 3]
     calm_days = [f['date'] for f in forecasts if get_severity_details(f['intensity'])[2] <= 2]
-    
+
     if len(heavy_days) >= 3:
         days_str = ", ".join(heavy_days[:-1]) + f" and {heavy_days[-1]}"
         return f"🚨 *'Grab your heavy-duty umbrellas, Ernakulam! ☔ IMD is predicting solid downpours on {days_str}.'* "
@@ -66,29 +96,27 @@ def get_ernakulam_data():
         with pdfplumber.open(io.BytesIO(response.content)) as pdf:
             first_page = pdf.pages[0]
             raw_text = first_page.extract_text() or ""
-            
-            # --- Extract Issue Date & Time from PDF Text ---
+
+            # Extract Issue Date & Time from PDF Text
             issue_time_match = re.search(r"Time of Issue:\s*([^\n]+)", raw_text, re.IGNORECASE)
             issue_time = issue_time_match.group(1).strip() if issue_time_match else "N/A"
-            
-            # Look for date pattern like "03 August 2026"
+
             date_match = re.search(r"\b(\d{1,2}\s+[A-Za-z]+\s+\d{4})\b", raw_text)
             issue_date = date_match.group(1).strip() if date_match else ""
-            
+
             full_issue_stamp = f"{issue_date} @ {issue_time}".strip(" @")
 
-            # --- Parse Forecast Tables ---
             tables = first_page.extract_tables()
             for table in tables:
                 header_row = table[0]
                 dates = [str(cell).replace('\n', '').strip() for cell in header_row[1:] if cell]
-                
+
                 for idx, row in enumerate(table):
                     if row and len(row) > 0 and row[0] and "Ernakulam" in str(row[0]):
                         intensity_vals = [str(c).replace('\n', ' ').strip() for c in row[2:] if c]
                         prob_row = table[idx + 1] if idx + 1 < len(table) else []
                         prob_vals = [str(c).replace('\n', ' ').strip() for c in prob_row[2:] if c]
-                        
+
                         daily_forecasts = []
                         for i in range(min(len(dates), len(intensity_vals), len(prob_vals))):
                             daily_forecasts.append({
@@ -100,11 +128,11 @@ def get_ernakulam_data():
     except Exception as e:
         print(f"Error parsing PDF: {e}")
         return None, None
-        
+
     return None, None
 
-def has_forecast_changed(forecasts, issue_stamp):
-    current_text = f"{issue_stamp} | " + " | ".join([f"{f['date']}:{f['intensity']}:{f['probability']}" for f in forecasts])
+def has_forecast_changed(forecasts, issue_stamp, holiday_alert):
+    current_text = f"{issue_stamp} | {holiday_alert} | " + " | ".join([f"{f['date']}:{f['intensity']}:{f['probability']}" for f in forecasts])
     if os.path.exists(CACHE_FILE):
         with open(CACHE_FILE, "r") as f:
             if f.read().strip() == current_text:
@@ -113,7 +141,7 @@ def has_forecast_changed(forecasts, issue_stamp):
         f.write(current_text)
     return True
 
-def send_discord_notification(forecasts, issue_stamp):
+def send_discord_notification(forecasts, issue_stamp, holiday_alert):
     if not DISCORD_WEBHOOK_URL:
         print("ERROR: DISCORD_WEBHOOK_URL environment variable is not set!")
         sys.exit(1)
@@ -137,16 +165,20 @@ def send_discord_notification(forecasts, issue_stamp):
     persona_commentary = generate_weather_presenter_commentary(forecasts)
     advisory = generate_commute_advisory(max_severity_score)
 
-    # Current IST check timestamp
     ist = pytz.timezone('Asia/Kolkata')
     checked_time_str = datetime.now(ist).strftime("%I:%M %p IST")
 
-    description_text = (
-        f"📌 **IMD Issue Bulletin:** `{issue_stamp}`\n\n"
-        f"{persona_commentary}\n\n"
-        f"{advisory}\n\n"
-        f"📄 [View Official IMD PDF]({PDF_URL})"
-    )
+    # Combine description components
+    description_parts = []
+    if holiday_alert:
+        description_parts.append(f"{holiday_alert}\n")
+
+    description_parts.append(f"📌 **IMD Issue Bulletin:** `{issue_stamp}`\n")
+    description_parts.append(f"{persona_commentary}\n")
+    description_parts.append(f"{advisory}\n")
+    description_parts.append(f"📄 [View Official IMD PDF]({PDF_URL})")
+
+    description_text = "\n".join(description_parts)
 
     payload = {
         "username": "Ernakulam Weather Radar",
@@ -159,20 +191,22 @@ def send_discord_notification(forecasts, issue_stamp):
             "footer": {"text": f"Checked at {checked_time_str} • IMD Tracker • Ernakulam"}
         }]
     }
-    
+
     res = requests.post(DISCORD_WEBHOOK_URL, json=payload)
     if res.status_code in [200, 204]:
-        print("Successfully sent full feature update to Discord!")
+        print("Successfully sent update to Discord!")
     else:
         print(f"Failed to send: {res.status_code}, {res.text}")
 
 if __name__ == "__main__":
     forecasts, issue_stamp = get_ernakulam_data()
+    holiday_alert = check_district_holiday()
+
     if forecasts:
-        if has_forecast_changed(forecasts, issue_stamp):
+        if has_forecast_changed(forecasts, issue_stamp, holiday_alert):
             print("New update detected! Sending to Discord...")
-            send_discord_notification(forecasts, issue_stamp)
+            send_discord_notification(forecasts, issue_stamp, holiday_alert)
         else:
-            print("No change in forecast since last check.")
+            print("No change in forecast or holiday news since last check.")
     else:
         print("Could not retrieve forecast data.")
