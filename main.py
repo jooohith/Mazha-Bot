@@ -2,6 +2,7 @@ import io
 import os
 import re
 import sys
+import urllib.parse
 from datetime import datetime
 import pytz
 import requests
@@ -12,39 +13,34 @@ DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 PDF_URL = "https://mausam.imd.gov.in/thiruvananthapuram/mcdata/district_rainfall_forecast.pdf"
 CACHE_FILE = "last_forecast.txt"
 
-# RSS Feeds for local news tracking
-NEWS_RSS_URLS = [
-    "https://www.manoramaonline.com/news/latest-news.rss",
-]
+# Google News RSS Search query for Ernakulam Holiday updates
+NEWS_QUERY = "Ernakulam (holiday OR അവധി OR collector)"
+ENCODED_QUERY = urllib.parse.quote(NEWS_QUERY)
+GOOGLE_NEWS_RSS = f"https://news.google.com/rss/search?q={ENCODED_QUERY}&hl=en-IN&gl=IN&ceid=IN:en"
 
 def check_district_holiday():
-    """Scrapes local news RSS feeds for Ernakulam holiday announcements."""
-    holiday_keywords = ["അവധി", "holiday", "collector", "കലക്ടർ"]
-    district_keywords = ["എറണാകുളം", "ernakulam"]
+    """Fetches real-time aggregated news headlines regarding Ernakulam holidays."""
+    try:
+        feed = feedparser.parse(GOOGLE_NEWS_RSS)
+        holiday_keywords = ["അവധി", "holiday", "collector", "കലക്ടർ"]
+        
+        for entry in feed.entries[:10]:  # Inspect top 10 recent headlines
+            title = entry.get("title", "")
+            title_lower = title.lower()
 
-    for feed_url in NEWS_RSS_URLS:
-        try:
-            feed = feedparser.parse(feed_url)
-            for entry in feed.entries[:15]:  # Check top 15 recent headlines
-                title = entry.get("title", "")
-                title_lower = title.lower()
-
-                # Check if headline contains both Ernakulam and Holiday terms
-                has_district = any(dk in title_lower for dk in district_keywords)
-                has_holiday = any(hk in title_lower for hk in holiday_keywords)
-
-                if has_district and has_holiday:
-                    link = entry.get("link", "")
-                    return f"🚨 **POSSIBLE DISTRICT HOLIDAY ALERT:**\n[{title}]({link})"
-        except Exception as e:
-            print(f"Error checking news feed {feed_url}: {e}")
+            if any(hk in title_lower for hk in holiday_keywords):
+                link = entry.get("link", "")
+                source = entry.get("source", {}).get("title", "News Outlet")
+                return f"🚨 **DISTRICT HOLIDAY COVERAGE FOUND ({source}):**\n[{title}]({link})"
+    except Exception as e:
+        print(f"Error checking Google News RSS: {e}")
 
     return None
 
 def get_severity_details(intensity):
     """Maps IMD intensity codes to visual progress bars, hex colors, and severity levels."""
     intensity_upper = str(intensity).upper()
-
+    
     if "XH" in intensity_upper or "EXTREMELY HEAVY" in intensity_upper:
         return "🟥🟥🟥🟥🟥 (Extremely Heavy)", 0xFF0000, 5
     elif "VH" in intensity_upper or "VERY HEAVY" in intensity_upper:
@@ -69,7 +65,7 @@ def generate_weather_presenter_commentary(forecasts):
     """Generates dynamic AI Weather Presenter persona commentary."""
     heavy_days = [f['date'] for f in forecasts if get_severity_details(f['intensity'])[2] >= 3]
     calm_days = [f['date'] for f in forecasts if get_severity_details(f['intensity'])[2] <= 2]
-
+    
     if len(heavy_days) >= 3:
         days_str = ", ".join(heavy_days[:-1]) + f" and {heavy_days[-1]}"
         return f"🚨 *'Grab your heavy-duty umbrellas, Ernakulam! ☔ IMD is predicting solid downpours on {days_str}.'* "
@@ -112,15 +108,12 @@ def get_ernakulam_data():
                 dates = [str(cell).replace('\n', '').strip() for cell in header_row[1:] if cell]
 
                 for idx, row in enumerate(table):
-                    # Locate the Ernakulam row
                     if row and len(row) > 0 and row[0] and "Ernakulam" in str(row[0]):
-                        
-                        # Inspect the adjacent row to pair them up
                         next_row = table[idx + 1] if idx + 1 < len(table) else []
                         
                         row_1_label = str(row[1]).lower() if len(row) > 1 and row[1] else ""
                         
-                        # Check which row contains "Intensity" vs "Probability"
+                        # Explicitly check which row is Intensity vs Probability
                         if "intensity" in row_1_label:
                             raw_intensity = row[2:]
                             raw_prob = next_row[2:] if next_row else []
@@ -182,7 +175,6 @@ def send_discord_notification(forecasts, issue_stamp, holiday_alert):
     ist = pytz.timezone('Asia/Kolkata')
     checked_time_str = datetime.now(ist).strftime("%I:%M %p IST")
 
-    # Combine description components
     description_parts = []
     if holiday_alert:
         description_parts.append(f"{holiday_alert}\n")
