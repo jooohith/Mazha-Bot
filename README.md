@@ -1,4 +1,4 @@
-# 🌧️ Mazha-Bot (മഴ-Bot)
+# 🌧️ Mazha-Radar (മഴ-Radar)
 
 [![Ernakulam Weather Tracker](https://github.com/jooohith/Mazha-Bot/actions/workflows/check_weather.yml/badge.svg)](https://github.com/jooohith/Mazha-Bot/actions/workflows/check_weather.yml)
 ![Python 3.10](https://img.shields.io/badge/Python-3.10-blue.svg)
@@ -6,7 +6,7 @@
 ![IMD Kerala](https://img.shields.io/badge/Data_Source-IMD_Kerala-orange.svg)
 
 > **Automated Ernakulam Rainfall & District Holiday Tracker**  
-> *Mazha-Bot* monitors official India Meteorological Department (IMD) daily bulletin updates and real-time news outlets for Ernakulam district holiday declarations, dispatching styled alerts directly to Discord.
+> *Mazha-Radar* monitors official India Meteorological Department (IMD) daily bulletin updates and real-time news outlets for Ernakulam district holiday declarations, dispatching styled alerts directly to Discord.
 
 ---
 
