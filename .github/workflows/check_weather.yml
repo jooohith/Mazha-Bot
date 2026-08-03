@@ -4,7 +4,7 @@ on:
   schedule:
     # Runs every 3 hours (At minute 0 of every 3rd hour)
     - cron: '0 */3 * * *'
-  workflow_dispatch: # Allows you to manually trigger the workflow from GitHub UI anytime
+  workflow_dispatch: # Allows you to manually trigger the workflow from the GitHub UI anytime
 
 jobs:
   run-scraper:
@@ -37,6 +37,12 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add last_forecast.txt
-          git commit -m "Update last forecast cache [skip ci]" || exit 0
-          git push
+          
+          # Check if the cache file exists before attempting to stage and push
+          if [ -f last_forecast.txt ]; then
+            git add last_forecast.txt
+            git commit -m "Update last forecast cache [skip ci]" || exit 0
+            git push
+          else
+            echo "last_forecast.txt does not exist yet. Skipping git commit."
+          fi
