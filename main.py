@@ -39,7 +39,6 @@ def check_district_holiday():
             "അവധി പ്രഖ്യാപിച്ചു", "സ്‌കൂളുകൾക്ക് അവധി"
         ]
         
-        # Exclude meta/editorial/commentary articles
         ignore_words = ["demands", "demand", "storm", "pressure", "trolls", "social media", "criticism"]
         
         ist = pytz.timezone('Asia/Kolkata')
@@ -72,17 +71,17 @@ def check_district_holiday():
     return None
 
 def parse_rgb_to_alert(rgb_tuple):
-    """Converts a pdfplumber non_stroking_color tuple into alert details."""
+    """Converts a pdfplumber non_stroking_color tuple into precise alert details."""
     if not rgb_tuple or not isinstance(rgb_tuple, (tuple, list)):
         return None
 
-    # Scale float RGB tuples (0.0 - 1.0) to (0 - 255)
+    # Handle float RGB tuples scaled 0.0 to 1.0 vs 0 to 255
     if all(isinstance(c, float) and c <= 1.0 for c in rgb_tuple):
         r, g, b = [int(c * 255) for c in rgb_tuple[:3]]
     else:
         r, g, b = [int(c) for c in rgb_tuple[:3]]
 
-    # Precise IMD Warning Categories RGB Matching
+    # Precise IMD Color Classification
     if r > 200 and g < 90:
         return "🟥🟥🟥🟥🟥 (Extremely Heavy / Red Alert)", 0xFF0000, 5
     elif r > 210 and 90 <= g <= 170:
@@ -95,13 +94,13 @@ def parse_rgb_to_alert(rgb_tuple):
     return None
 
 def get_severity_details(intensity, rgb_tuple=None):
-    """Primary RGB spatial matcher with comprehensive string fallbacks."""
-    # 1. Direct RGB vector fill matching from PDF
+    """Primary RGB vector matcher with fallback text checks."""
+    # 1. Try vector background color matching first
     rgb_result = parse_rgb_to_alert(rgb_tuple)
     if rgb_result:
         return rgb_result
 
-    # 2. String fallback (handles text variants like 'ISOL H to VH*')
+    # 2. String fallback
     intensity_upper = str(intensity).upper()
     if "H TO VH" in intensity_upper or "VH*" in intensity_upper or "EXTREMELY" in intensity_upper:
         return "🟥🟥🟥🟥🟥 (Extremely Heavy / Red Alert)", 0xFF0000, 5
@@ -143,6 +142,20 @@ def generate_weather_presenter_commentary(forecasts):
     else:
         return "☀️ *'Good news, Ernakulam! No crazy downpours on the radar—just light to moderate showers scattered through the week.'*"
 
+def get_cell_bg_color(cell_bbox, colored_rects):
+    """Finds the vector rectangle color containing the center point of a cell bbox."""
+    if not cell_bbox:
+        return None
+    cx0, ctop, cx1, cbottom = cell_bbox
+    mid_x = (cx0 + cx1) / 2.0
+    mid_y = (ctop + cbottom) / 2.0
+
+    for r in colored_rects:
+        rx0, rtop, rx1, rbottom = r['x0'], r['top'], r['x1'], r['bottom']
+        if rx0 <= mid_x <= rx1 and rtop <= mid_y <= rbottom:
+            return r.get("non_stroking_color")
+    return None
+
 def get_ernakulam_data():
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
@@ -165,7 +178,7 @@ def get_ernakulam_data():
 
             full_issue_stamp = f"{issue_date} @ {issue_time}".strip(" @")
 
-            # Extract fill rects with valid background colors
+            # Extract filled non-black/non-white background rectangles
             colored_rects = [
                 r for r in first_page.rects 
                 if r.get("non_stroking_color") and r.get("non_stroking_color") not in [(0,), (1,), (0,0,0), (1,1,1)]
@@ -202,14 +215,8 @@ def get_ernakulam_data():
                             col_cell_idx = i + 2
                             cell_bbox = tbl.rows[target_row_idx].cells[col_cell_idx]
                             
-                            matched_color = None
-                            if cell_bbox:
-                                cx0, ctop, cx1, cbottom = cell_bbox
-                                for r in colored_rects:
-                                    rx0, rtop, rx1, rbottom = r['x0'], r['top'], r['x1'], r['bottom']
-                                    if abs(rx0 - cx0) < 15 and abs(rtop - ctop) < 15:
-                                        matched_color = r.get("non_stroking_color")
-                                        break
+                            # Perform precise mid-point spatial sampling for background color
+                            matched_color = get_cell_bg_color(cell_bbox, colored_rects)
 
                             daily_forecasts.append({
                                 "date": dates[i],
@@ -225,7 +232,7 @@ def get_ernakulam_data():
     return None, None
 
 def has_forecast_changed(forecasts, issue_stamp, holiday_alert):
-    current_text = f"{issue_stamp} | {holiday_alert} | " + " | ".join([f"{f['date']}:{f['intensity']}:{f['probability']}" for f in forecasts])
+    current_text = f"{issue_stamp} | {holiday_alert} | " + " | ".join([f"{f['date']}:{f['intensity']}:{f['probability']}:{f.get('color')}" for f in forecasts])
     if os.path.exists(CACHE_FILE):
         with open(CACHE_FILE, "r") as f:
             if f.read().strip() == current_text:
