@@ -39,7 +39,7 @@ def check_district_holiday():
             "അവധി പ്രഖ്യാപിച്ചു", "സ്‌കൂളുകൾക്ക് അവധി"
         ]
         
-        # Exclude meta/editorial articles
+        # Exclude meta/editorial/commentary articles
         ignore_words = ["demands", "demand", "storm", "pressure", "trolls", "social media", "criticism"]
         
         ist = pytz.timezone('Asia/Kolkata')
@@ -82,7 +82,7 @@ def parse_rgb_to_alert(rgb_tuple):
     else:
         r, g, b = [int(c) for c in rgb_tuple[:3]]
 
-    # IMD Warning Categories RGB Matching
+    # Precise IMD Warning Categories RGB Matching
     if r > 200 and g < 90:
         return "🟥🟥🟥🟥🟥 (Extremely Heavy / Red Alert)", 0xFF0000, 5
     elif r > 210 and 90 <= g <= 170:
@@ -101,7 +101,7 @@ def get_severity_details(intensity, rgb_tuple=None):
     if rgb_result:
         return rgb_result
 
-    # 2. Robust string fallback
+    # 2. String fallback (handles text variants like 'ISOL H to VH*')
     intensity_upper = str(intensity).upper()
     if "H TO VH" in intensity_upper or "VH*" in intensity_upper or "EXTREMELY" in intensity_upper:
         return "🟥🟥🟥🟥🟥 (Extremely Heavy / Red Alert)", 0xFF0000, 5
@@ -117,12 +117,14 @@ def get_severity_details(intensity, rgb_tuple=None):
         return "🟩⬜⬜⬜⬜ (Light/None)", 0x2ECC71, 1
 
 def generate_commute_advisory(max_score):
-    if max_score >= 4:
-        return "🚨 **Commute Alert:** Severe downpours expected! Expect traffic slowdowns, potential waterlogging in low-lying areas, and poor visibility."
+    if max_score >= 5:
+        return "🚨 **Red Alert Commute Warning:** Extremely severe downpours probable! High likelihood of waterlogging, low visibility, and disrupted travel."
+    elif max_score == 4:
+        return "🟧 **Orange Alert Advisory:** Heavy to very heavy rainfall expected. Leave early, exercise extreme caution, and check for local traffic updates."
     elif max_score == 3:
         return "🛵 **Road Advisory:** Heavy rain patches likely. Keep rain gear handy and watch for slick road surfaces."
     else:
-        return "🟢 **Commute Advisory:** Weather looks manageable. Good conditions for standard daily travel!"
+        return "🟢 **Commute Advisory:** Weather looks manageable. Normal conditions for standard daily travel!"
 
 def generate_weather_presenter_commentary(forecasts):
     heavy_days = [f['date'] for f in forecasts if get_severity_details(f['intensity'], f.get('color'))[2] >= 3]
