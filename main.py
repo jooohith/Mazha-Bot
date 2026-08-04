@@ -12,6 +12,8 @@ import feedparser
 
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 PDF_URL = "https://mausam.imd.gov.in/thiruvananthapuram/mcdata/district_rainfall_forecast.pdf"
+RADAR_PORTAL_URL = "https://mausam.imd.gov.in/thiruvananthapuram/index_radar.php?id=Kochi"
+RADAR_IMAGE_URL = "https://mausam.imd.gov.in/thiruvananthapuram/Radar/Kochi_MAX.gif"
 CACHE_FILE = "last_forecast.txt"
 
 NEWS_QUERY = "Ernakulam (holiday OR അവധി OR collector) when:1d"
@@ -27,22 +29,20 @@ def resolve_clean_url(url):
         return url
 
 def check_district_holiday():
-    """Fetches a single news headline strictly regarding Ernakulam holidays for today or tomorrow."""
+    """Fetches news strictly regarding official Ernakulam holiday declarations."""
     try:
         feed = feedparser.parse(GOOGLE_NEWS_RSS)
-        holiday_keywords = ["അവധി", "holiday", "collector", "കലക്ടർ"]
+        
+        declaration_phrases = [
+            "declared holiday", "declares holiday", "holiday declared", 
+            "holiday for schools", "holiday for educational",
+            "അവധി പ്രഖ്യാപിച്ചു", "സ്‌കൂളുകൾക്ക് അവധി"
+        ]
+        
+        ignore_words = ["demands", "demand", "storm", "pressure", "trolls", "social media", "criticism"]
         
         ist = pytz.timezone('Asia/Kolkata')
         now_ist = datetime.now(ist)
-        
-        yesterday_ist = now_ist - timedelta(days=1)
-        yesterday_num = yesterday_ist.strftime("%d").lstrip("0")
-        
-        yesterday_patterns = [
-            f"august {yesterday_num}", f"aug {yesterday_num}",
-            f"{yesterday_num} august", f"{yesterday_num} aug",
-            f"അഗസ്റ്റ് {yesterday_num}", f"{yesterday_num} അഗസ്റ്റ്"
-        ]
 
         for entry in feed.entries[:10]:
             title = entry.get("title", "").strip()
@@ -50,7 +50,10 @@ def check_district_holiday():
             raw_link = entry.get("link", "")
             combined_text = (title + " " + summary).lower()
 
-            if any(hk in combined_text for hk in holiday_keywords):
+            if any(iw in combined_text for iw in ignore_words):
+                continue
+
+            if any(dp in combined_text for dp in declaration_phrases):
                 published_parsed = entry.get("published_parsed")
                 if published_parsed:
                     pub_time_epoch = time.mktime(published_parsed)
@@ -59,36 +62,60 @@ def check_district_holiday():
                     if pub_dt.date() < now_ist.date() and (now_ist - pub_dt) > timedelta(hours=4):
                         continue
 
-                if any(yp in combined_text for yp in yesterday_patterns):
-                    continue
-
                 clean_link = resolve_clean_url(raw_link)
                 source = entry.get("source", {}).get("title", "News Outlet")
-                return f"🚨 **DISTRICT HOLIDAY COVERAGE FOUND ({source}):**\n[{title}]({clean_link})"
+                return f"🚨 **DISTRICT HOLIDAY ANNOUNCEMENT ({source}):**\n[{title}]({clean_link})"
     except Exception as e:
         print(f"Error checking Google News RSS: {e}")
 
     return None
 
-def get_severity_details(intensity):
-    """Maps IMD intensity codes to visual progress bars, hex colors, and severity levels."""
-    intensity_upper = str(intensity).upper()
+def parse_rgb_to_alert(rgb_tuple):
+    """Converts a pdfplumber non_stroking_color tuple into alert details."""
+    if not rgb_tuple or not isinstance(rgb_tuple, (tuple, list)):
+        return None
+
+    # Handle float RGB tuples scaled from 0.0 to 1.0 (e.g. (1.0, 0.0, 0.0))
+    if all(isinstance(c, float) and c <= 1.0 for c in rgb_tuple):
+        r, g, b = [int(c * 255) for c in rgb_tuple[:3]]
+    else:
+        r, g, b = [int(c) for c in rgb_tuple[:3]]
+
+    # Map RGB ranges to IMD Warning Categories
+    if r > 200 and g < 100:
+        return "🟥🟥🟥🟥🟥 (Extremely Heavy / Red Alert)", 0xFF0000, 5
+    elif r > 220 and 100 <= g <= 180:
+        return "🟧🟧🟧🟧⬜ (Very Heavy / Orange Alert)", 0xE67E22, 4
+    elif r > 200 and g > 180 and b < 120:
+        return "🟨🟨⬜⬜⬜ (Heavy / Yellow Alert)", 0xF1C40F, 3
+    elif g > 150 and r < 120:
+        return "🟩⬜⬜⬜⬜ (Light to Moderate / Green Alert)", 0x2ECC71, 1
     
+    return None
+
+def get_severity_details(intensity, rgb_tuple=None):
+    """Primary fallback parser using RGB first, falling back to string matching."""
+    # 1. First try direct vector background color matching
+    rgb_result = parse_rgb_to_alert(rgb_tuple)
+    if rgb_result:
+        return rgb_result
+
+    # 2. String fallback logic
+    intensity_upper = str(intensity).upper()
     if "XH" in intensity_upper or "EXTREMELY HEAVY" in intensity_upper:
         return "🟥🟥🟥🟥🟥 (Extremely Heavy)", 0xFF0000, 5
-    elif "VH" in intensity_upper or "VERY HEAVY" in intensity_upper:
-        return "🟧🟧🟧🟧⬜ (Very Heavy)", 0xE74C3C, 4
+    elif "VH" in intensity_upper or "VERY HEAVY" in intensity_upper or "H TO VH" in intensity_upper:
+        return "🟧🟧🟧🟧⬜ (Very Heavy)", 0xE67E22, 4
     elif "ISOL. H" in intensity_upper or "ISOL . H" in intensity_upper:
-        # 🟡 Yellow Alert (Isolated Heavy)
-        return "🟨🟨⬜⬜⬜ (Heavy)", 0xF1C40F, 3
+        return "🟨🟨⬜⬜⬜ (Heavy / Yellow Alert)", 0xF1C40F, 3
     elif "H" in intensity_upper or "HEAVY" in intensity_upper:
         return "🟧🟧🟧⬜⬜ (Heavy)", 0xE67E22, 3
     elif "M" in intensity_upper or "L TO M" in intensity_upper or "MODERATE" in intensity_upper:
         return "🟦🟦⬜⬜⬜ (Light to Moderate)", 0x3498DB, 2
     else:
         return "🟩⬜⬜⬜⬜ (Light/None)", 0x2ECC71, 1
+
 def generate_commute_advisory(max_score):
-    """Generates commuting/riding tips based on overall severity."""
     if max_score >= 4:
         return "🚨 **Commute Alert:** Severe downpours expected! Expect traffic slowdowns, potential waterlogging in low-lying areas, and poor visibility."
     elif max_score == 3:
@@ -97,9 +124,8 @@ def generate_commute_advisory(max_score):
         return "🟢 **Commute Advisory:** Weather looks manageable. Good conditions for standard daily travel!"
 
 def generate_weather_presenter_commentary(forecasts):
-    """Generates dynamic AI Weather Presenter persona commentary."""
-    heavy_days = [f['date'] for f in forecasts if get_severity_details(f['intensity'])[2] >= 3]
-    calm_days = [f['date'] for f in forecasts if get_severity_details(f['intensity'])[2] <= 2]
+    heavy_days = [f['date'] for f in forecasts if get_severity_details(f['intensity'], f.get('color'))[2] >= 3]
+    calm_days = [f['date'] for f in forecasts if get_severity_details(f['intensity'], f.get('color'))[2] <= 2]
     
     if len(heavy_days) >= 3:
         days_str = ", ".join(heavy_days[:-1]) + f" and {heavy_days[-1]}"
@@ -136,7 +162,13 @@ def get_ernakulam_data():
 
             full_issue_stamp = f"{issue_date} @ {issue_time}".strip(" @")
 
-            tables = first_page.extract_tables()
+            # 📌 Extract fill rectangles for vector color matching
+            colored_rects = [r for r in first_page.rects if r.get("non_stroking_color") is not None]
+
+            tables = first_page.extract_tables(table_settings={"vertical_strategy": "lines", "horizontal_strategy": "lines"})
+            if not tables:
+                tables = first_page.extract_tables()
+
             for table in tables:
                 header_row = table[0]
                 dates = [str(cell).replace('\n', '').strip() for cell in header_row[1:] if cell]
@@ -159,10 +191,20 @@ def get_ernakulam_data():
 
                         daily_forecasts = []
                         for i in range(min(len(dates), len(intensity_vals), len(prob_vals))):
+                            # Search rect list for matching cell background color
+                            matched_color = None
+                            for r in colored_rects:
+                                color = r.get("non_stroking_color")
+                                # Skip pure black or white borders
+                                if color and color not in [(0,), (1,), (0,0,0), (1,1,1)]:
+                                    matched_color = color
+                                    break
+
                             daily_forecasts.append({
                                 "date": dates[i],
                                 "intensity": intensity_vals[i],
-                                "probability": prob_vals[i]
+                                "probability": prob_vals[i],
+                                "color": matched_color
                             })
                         return daily_forecasts, full_issue_stamp
     except Exception as e:
@@ -191,7 +233,7 @@ def send_discord_notification(forecasts, issue_stamp, holiday_alert, is_changed=
     embed_color = 0x3498DB
 
     for f in forecasts:
-        bar_text, color_code, score = get_severity_details(f['intensity'])
+        bar_text, color_code, score = get_severity_details(f['intensity'], f.get('color'))
         if score > max_severity_score:
             max_severity_score = score
             embed_color = color_code
@@ -210,7 +252,6 @@ def send_discord_notification(forecasts, issue_stamp, holiday_alert, is_changed=
 
     description_parts = []
 
-    # Status header depending on whether data changed
     if is_changed:
         description_parts.append("🚨 **NEW UPDATE / FORECAST CHANGED**\n")
     else:
@@ -223,6 +264,7 @@ def send_discord_notification(forecasts, issue_stamp, holiday_alert, is_changed=
     description_parts.append(f"{persona_commentary}\n")
     description_parts.append(f"{advisory}\n")
     description_parts.append(f"📄 [View Official IMD PDF]({PDF_URL})")
+    description_parts.append(f"📡 [View Live Kochi Interactive Radar Portal]({RADAR_PORTAL_URL})")
 
     description_text = "\n".join(description_parts)
 
@@ -230,11 +272,14 @@ def send_discord_notification(forecasts, issue_stamp, holiday_alert, is_changed=
         "username": "Ernakulam Weather Radar",
         "avatar_url": "https://upload.wikimedia.org/wikipedia/commons/9/91/India_Meteorological_Department_logo.png",
         "embeds": [{
-            "title": "🎙️ Ernakulam District Rainfall Dispatch",
+            "title": "🎙️ Ernakulam District Rainfall & Radar Dispatch",
             "description": description_text,
-            "color": embed_color if is_changed else 0x7F8C8D,  # Grey header if no change
+            "color": embed_color if is_changed else 0x7F8C8D,
             "fields": embed_fields,
-            "footer": {"text": f"Checked at {checked_time_str} • IMD Tracker • Ernakulam"}
+            "image": {
+                "url": RADAR_IMAGE_URL
+            },
+            "footer": {"text": f"Checked at {checked_time_str} • IMD Radar Tracker • Ernakulam"}
         }]
     }
 
