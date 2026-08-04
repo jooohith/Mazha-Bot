@@ -2,16 +2,22 @@ name: Check IMD Weather Forecast
 
 on:
   schedule:
-    # Runs every 3 hours (At minute 0 of every 3rd hour)
-    - cron: '0 */3 * * *'
-  workflow_dispatch: # Allows you to manually trigger the workflow from the GitHub UI anytime
+    # 🚨 Rush Hour (5:00 AM to 9:00 AM IST / 23:30 to 03:30 UTC):
+    # Runs EVERY 15 MINUTES when holiday announcements and morning weather updates drop
+    - cron: '*/15 23,0,1,2,3 * * *'
+
+    # 🌤️ Rest of the Day (9:00 AM to 11:00 PM IST / 03:30 to 17:30 UTC):
+    # Runs EVERY 1 HOUR to keep tabs on afternoon update shifts efficiently
+    - cron: '0 4-17 * * *'
+
+  workflow_dispatch: # Allows manual trigger from GitHub UI anytime
 
 jobs:
   run-scraper:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository code
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -19,30 +25,10 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Cache pip packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
-
-      - name: Install dependencies
+      - name: Install Dependencies
         run: pip install -r requirements.txt
 
-      - name: Run Weather Script
+      - name: Run Tracker Engine
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python main.py
-
-      - name: Commit updated cache file
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          
-          # Check if the cache file exists before attempting to stage and push
-          if [ -f last_forecast.txt ]; then
-            git add last_forecast.txt
-            git commit -m "Update last forecast cache [skip ci]" || exit 0
-            git push
-          else
-            echo "last_forecast.txt does not exist yet. Skipping git commit."
-          fi
