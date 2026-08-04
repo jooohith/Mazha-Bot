@@ -93,27 +93,6 @@ def parse_rgb_to_alert(rgb_tuple):
     
     return None
 
-def get_severity_details(intensity, rgb_tuple=None):
-    """Primary fallback parser using RGB first, falling back to string matching."""
-    # 1. First try direct vector background color matching
-    rgb_result = parse_rgb_to_alert(rgb_tuple)
-    if rgb_result:
-        return rgb_result
-
-    # 2. String fallback logic
-    intensity_upper = str(intensity).upper()
-    if "XH" in intensity_upper or "EXTREMELY HEAVY" in intensity_upper:
-        return "🟥🟥🟥🟥🟥 (Extremely Heavy)", 0xFF0000, 5
-    elif "VH" in intensity_upper or "VERY HEAVY" in intensity_upper or "H TO VH" in intensity_upper:
-        return "🟧🟧🟧🟧⬜ (Very Heavy)", 0xE67E22, 4
-    elif "ISOL. H" in intensity_upper or "ISOL . H" in intensity_upper:
-        return "🟨🟨⬜⬜⬜ (Heavy / Yellow Alert)", 0xF1C40F, 3
-    elif "H" in intensity_upper or "HEAVY" in intensity_upper:
-        return "🟧🟧🟧⬜⬜ (Heavy)", 0xE67E22, 3
-    elif "M" in intensity_upper or "L TO M" in intensity_upper or "MODERATE" in intensity_upper:
-        return "🟦🟦⬜⬜⬜ (Light to Moderate)", 0x3498DB, 2
-    else:
-        return "🟩⬜⬜⬜⬜ (Light/None)", 0x2ECC71, 1
 
 def generate_commute_advisory(max_score):
     if max_score >= 4:
