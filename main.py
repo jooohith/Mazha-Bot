@@ -39,6 +39,7 @@ def check_district_holiday():
             "അവധി പ്രഖ്യാപിച്ചു", "സ്‌കൂളുകൾക്ക് അവധി"
         ]
         
+        # Exclude meta/editorial articles
         ignore_words = ["demands", "demand", "storm", "pressure", "trolls", "social media", "criticism"]
         
         ist = pytz.timezone('Asia/Kolkata')
@@ -75,24 +76,45 @@ def parse_rgb_to_alert(rgb_tuple):
     if not rgb_tuple or not isinstance(rgb_tuple, (tuple, list)):
         return None
 
-    # Handle float RGB tuples scaled from 0.0 to 1.0 (e.g. (1.0, 0.0, 0.0))
+    # Scale float RGB tuples (0.0 - 1.0) to (0 - 255)
     if all(isinstance(c, float) and c <= 1.0 for c in rgb_tuple):
         r, g, b = [int(c * 255) for c in rgb_tuple[:3]]
     else:
         r, g, b = [int(c) for c in rgb_tuple[:3]]
 
-    # Map RGB ranges to IMD Warning Categories
-    if r > 200 and g < 100:
+    # IMD Warning Categories RGB Matching
+    if r > 200 and g < 90:
         return "🟥🟥🟥🟥🟥 (Extremely Heavy / Red Alert)", 0xFF0000, 5
-    elif r > 220 and 100 <= g <= 180:
+    elif r > 210 and 90 <= g <= 170:
         return "🟧🟧🟧🟧⬜ (Very Heavy / Orange Alert)", 0xE67E22, 4
-    elif r > 200 and g > 180 and b < 120:
+    elif r > 200 and g > 170 and b < 120:
         return "🟨🟨⬜⬜⬜ (Heavy / Yellow Alert)", 0xF1C40F, 3
-    elif g > 150 and r < 120:
+    elif g > 140 and r < 120:
         return "🟩⬜⬜⬜⬜ (Light to Moderate / Green Alert)", 0x2ECC71, 1
     
     return None
 
+def get_severity_details(intensity, rgb_tuple=None):
+    """Primary RGB spatial matcher with comprehensive string fallbacks."""
+    # 1. Direct RGB vector fill matching from PDF
+    rgb_result = parse_rgb_to_alert(rgb_tuple)
+    if rgb_result:
+        return rgb_result
+
+    # 2. Robust string fallback
+    intensity_upper = str(intensity).upper()
+    if "H TO VH" in intensity_upper or "VH*" in intensity_upper or "EXTREMELY" in intensity_upper:
+        return "🟥🟥🟥🟥🟥 (Extremely Heavy / Red Alert)", 0xFF0000, 5
+    elif "VH" in intensity_upper or "VERY HEAVY" in intensity_upper:
+        return "🟧🟧🟧🟧⬜ (Very Heavy / Orange Alert)", 0xE67E22, 4
+    elif "ISOL. H" in intensity_upper or "ISOL . H" in intensity_upper or "ISOL H" in intensity_upper:
+        return "🟨🟨⬜⬜⬜ (Heavy / Yellow Alert)", 0xF1C40F, 3
+    elif "H" in intensity_upper or "HEAVY" in intensity_upper:
+        return "🟧🟧🟧⬜⬜ (Heavy)", 0xE67E22, 3
+    elif "M" in intensity_upper or "L TO M" in intensity_upper:
+        return "🟦🟦⬜⬜⬜ (Light to Moderate)", 0x3498DB, 2
+    else:
+        return "🟩⬜⬜⬜⬜ (Light/None)", 0x2ECC71, 1
 
 def generate_commute_advisory(max_score):
     if max_score >= 4:
@@ -141,43 +163,51 @@ def get_ernakulam_data():
 
             full_issue_stamp = f"{issue_date} @ {issue_time}".strip(" @")
 
-            # 📌 Extract fill rectangles for vector color matching
-            colored_rects = [r for r in first_page.rects if r.get("non_stroking_color") is not None]
+            # Extract fill rects with valid background colors
+            colored_rects = [
+                r for r in first_page.rects 
+                if r.get("non_stroking_color") and r.get("non_stroking_color") not in [(0,), (1,), (0,0,0), (1,1,1)]
+            ]
 
-            tables = first_page.extract_tables(table_settings={"vertical_strategy": "lines", "horizontal_strategy": "lines"})
-            if not tables:
-                tables = first_page.extract_tables()
+            tables_with_positions = first_page.find_tables()
 
-            for table in tables:
-                header_row = table[0]
-                dates = [str(cell).replace('\n', '').strip() for cell in header_row[1:] if cell]
-
-                for idx, row in enumerate(table):
+            for tbl in tables_with_positions:
+                extracted_table = tbl.extract()
+                
+                for row_idx, row in enumerate(extracted_table):
                     if row and len(row) > 0 and row[0] and "Ernakulam" in str(row[0]):
-                        next_row = table[idx + 1] if idx + 1 < len(table) else []
+                        header_row = extracted_table[0]
+                        dates = [str(cell).replace('\n', '').strip() for cell in header_row[1:] if cell]
+
+                        next_row = extracted_table[row_idx + 1] if row_idx + 1 < len(extracted_table) else []
                         
                         row_1_label = str(row[1]).lower() if len(row) > 1 and row[1] else ""
                         
                         if "intensity" in row_1_label:
                             raw_intensity = row[2:]
                             raw_prob = next_row[2:] if next_row else []
+                            target_row_idx = row_idx
                         else:
                             raw_prob = row[2:]
                             raw_intensity = next_row[2:] if next_row else []
+                            target_row_idx = row_idx + 1
 
                         intensity_vals = [str(c).replace('\n', ' ').strip() for c in raw_intensity if c]
                         prob_vals = [str(c).replace('\n', ' ').strip() for c in raw_prob if c]
 
                         daily_forecasts = []
                         for i in range(min(len(dates), len(intensity_vals), len(prob_vals))):
-                            # Search rect list for matching cell background color
+                            col_cell_idx = i + 2
+                            cell_bbox = tbl.rows[target_row_idx].cells[col_cell_idx]
+                            
                             matched_color = None
-                            for r in colored_rects:
-                                color = r.get("non_stroking_color")
-                                # Skip pure black or white borders
-                                if color and color not in [(0,), (1,), (0,0,0), (1,1,1)]:
-                                    matched_color = color
-                                    break
+                            if cell_bbox:
+                                cx0, ctop, cx1, cbottom = cell_bbox
+                                for r in colored_rects:
+                                    rx0, rtop, rx1, rbottom = r['x0'], r['top'], r['x1'], r['bottom']
+                                    if abs(rx0 - cx0) < 15 and abs(rtop - ctop) < 15:
+                                        matched_color = r.get("non_stroking_color")
+                                        break
 
                             daily_forecasts.append({
                                 "date": dates[i],
