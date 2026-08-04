@@ -77,14 +77,16 @@ def get_severity_details(intensity):
     if "XH" in intensity_upper or "EXTREMELY HEAVY" in intensity_upper:
         return "🟥🟥🟥🟥🟥 (Extremely Heavy)", 0xFF0000, 5
     elif "VH" in intensity_upper or "VERY HEAVY" in intensity_upper:
-        return "🟥🟥🟥🟥⬜ (Very Heavy)", 0xE74C3C, 4
+        return "🟧🟧🟧🟧⬜ (Very Heavy)", 0xE74C3C, 4
+    elif "ISOL. H" in intensity_upper or "ISOL . H" in intensity_upper:
+        # 🟡 Yellow Alert (Isolated Heavy)
+        return "🟨🟨⬜⬜⬜ (Heavy)", 0xF1C40F, 3
     elif "H" in intensity_upper or "HEAVY" in intensity_upper:
         return "🟧🟧🟧⬜⬜ (Heavy)", 0xE67E22, 3
     elif "M" in intensity_upper or "L TO M" in intensity_upper or "MODERATE" in intensity_upper:
         return "🟦🟦⬜⬜⬜ (Light to Moderate)", 0x3498DB, 2
     else:
         return "🟩⬜⬜⬜⬜ (Light/None)", 0x2ECC71, 1
-
 def generate_commute_advisory(max_score):
     """Generates commuting/riding tips based on overall severity."""
     if max_score >= 4:
